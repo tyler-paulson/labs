@@ -1,0 +1,23 @@
+# Block access to .env file
+<Files .env>
+    Order allow,deny
+    Deny from all
+</Files>
+
+# Block access to composer files
+<FilesMatch "^(composer\.json|composer\.lock)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# Block access to sql directory
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^sql/ - [F,L]
+</IfModule>
+
+# Block access to config directory
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^config/ - [F,L]
+</IfModule> 
