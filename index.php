@@ -10,6 +10,8 @@ $dotenv->load();
 // Set default values for environment variables
 $_ENV['DB_HOST'] = $_ENV['DB_HOST'] ?? 'localhost';
 
+$_ENV['LENGTH_OF_SLOT'] = $_ENV['LENGTH_OF_SLOT'] ?? 20;
+
 try {
     $pdo = new PDO(
         "mysql:host={$_ENV['DB_HOST']};dbname={$_ENV['DB_NAME']}",
@@ -145,7 +147,7 @@ $termInfo = $stmt->fetch(PDO::FETCH_ASSOC);
 <body class="bg-gray-100 min-h-screen">
     <div class="container mx-auto px-4 py-8">
         <h1 class="text-gray-900 text-3xl font-bold text-center mb-2">Website Hacking Lab</h1>
-        <h2 class="text-gray-800 text-xl font-bold text-center mb-8">Book an Appointment</h2>
+        <h2 class="text-gray-800 text-xl font-bold text-center mb-8">Book a <?php echo $_ENV['LENGTH_OF_SLOT']; ?>-minute Appointment</h2>
         
         <?php if (isset($success)): ?>
             <div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded mb-4">
