@@ -25,74 +25,81 @@ try {
 
 // Handle form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+
     $name = htmlspecialchars($_POST['name'] ?? '', ENT_QUOTES, 'UTF-8');
     $email = filter_input(INPUT_POST, 'email', FILTER_SANITIZE_EMAIL);
     $time_id = filter_input(INPUT_POST, 'time_id', FILTER_SANITIZE_NUMBER_INT);
 
     if ($name && $email && $time_id) {
-        try {
-            $pdo->beginTransaction();
+        // Validate email domain
+        $emailDomain = substr(strrchr($email, "@"), 1);
+        if (!empty($_ENV['REG_EMAIL_DOMAIN']) && $emailDomain !== $_ENV['REG_EMAIL_DOMAIN']) {
+            $error = "Registrations from this email domain are not allowed.";
+        } else {
+            try {
+                $pdo->beginTransaction();
 
-            // Check if the time slot is still available
-            $stmt = $pdo->prepare("SELECT available FROM times WHERE id = ?");
-            $stmt->execute([$time_id]);
-            $timeSlot = $stmt->fetch(PDO::FETCH_ASSOC);
+                // Check if the time slot is still available
+                $stmt = $pdo->prepare("SELECT available FROM times WHERE id = ?");
+                $stmt->execute([$time_id]);
+                $timeSlot = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            if (!$timeSlot || $timeSlot['available'] != 1) {
-                throw new Exception("This time slot is no longer available. Please select another time.");
+                if (!$timeSlot || $timeSlot['available'] != 1) {
+                    throw new Exception("This time slot is no longer available. Please select another time.");
+                }
+
+                // Get the appointment time for the email
+                $stmt = $pdo->prepare("SELECT time FROM times WHERE id = ?");
+                $stmt->execute([$time_id]);
+                $appointmentTime = $stmt->fetch(PDO::FETCH_ASSOC)['time'];
+                $datetimePacific = new DateTime($appointmentTime, new DateTimeZone('America/New_York'));
+                $datetimePacific->setTimezone(new DateTimeZone('America/Los_Angeles'));
+                $formattedTimePacific = $datetimePacific->format('F j, Y g:i A');
+
+                $datetimeEastern = new DateTime($appointmentTime, new DateTimeZone('America/New_York'));
+                $formattedTimeEastern = $datetimeEastern->format('F j, Y g:i A');
+
+                // Insert into appointments table
+                $stmt = $pdo->prepare("INSERT INTO appointments (name, email, time_id) VALUES (?, ?, ?)");
+                $stmt->execute([$name, $email, $time_id]);
+
+                // Update times table
+                $stmt = $pdo->prepare("UPDATE times SET available = 0 WHERE id = ?");
+                $stmt->execute([$time_id]);
+
+                // Send confirmation emails
+                $client = new PostmarkClient($_ENV['POSTMARK_API_KEY']);
+
+                $message1 = array(
+                    'To' => $email,
+                    'From' => $_ENV['FROM_NAME'] . " <" . $_ENV['FROM_EMAIL'] . ">",
+                    'Subject' => "Website Hacking Lab Time Confirmation",
+                    'TextBody' => "Hello {$name},\n\n" .
+                    "Your meeting time has been confirmed for {$formattedTimePacific} Pacific Time.\n\n" .
+                    "Use the following link to join the meeting:\n" . $_ENV['MEETING_LINK'] . "\n\n" .
+                    "If you are meeting with me in hopes I will help you solve a problem with the site you are building, emailing me a publicly viewable link and a short description of your problem ahead of time may help our session be more productive." . "\n\n" .
+                    "See you then!\n\n"
+                );
+
+                $message2 = array(
+                    'To' => $_ENV['FROM_EMAIL'],
+                    'From' => "Website Hacking Lab <" . $_ENV['FROM_EMAIL'] . ">",
+                    'Subject' => "New Appointment Booking",
+                    'ReplyTo' => $name . " <" . $email . ">",
+                    'TextBody' => "A new Website Hacking Lab appointment has been booked:\n\n" .
+                    "Student: {$name}\n" .
+                    "Email: {$email}\n" .
+                    "Time: {$formattedTimeEastern} Eastern Time\n\n"
+                );  
+
+                $client->sendEmailBatch([$message1, $message2]);
+
+                $pdo->commit();
+                $success = "Appointment booked successfully! A confirmation email has been sent.";
+            } catch (Exception $e) {
+                $pdo->rollBack();
+                $error = "Error booking appointment: " . $e->getMessage();
             }
-
-            // Get the appointment time for the email
-            $stmt = $pdo->prepare("SELECT time FROM times WHERE id = ?");
-            $stmt->execute([$time_id]);
-            $appointmentTime = $stmt->fetch(PDO::FETCH_ASSOC)['time'];
-            $datetimePacific = new DateTime($appointmentTime, new DateTimeZone('America/New_York'));
-            $datetimePacific->setTimezone(new DateTimeZone('America/Los_Angeles'));
-            $formattedTimePacific = $datetimePacific->format('F j, Y g:i A');
-
-            $datetimeEastern = new DateTime($appointmentTime, new DateTimeZone('America/New_York'));
-            $formattedTimeEastern = $datetimeEastern->format('F j, Y g:i A');
-
-            // Insert into appointments table
-            $stmt = $pdo->prepare("INSERT INTO appointments (name, email, time_id) VALUES (?, ?, ?)");
-            $stmt->execute([$name, $email, $time_id]);
-
-            // Update times table
-            $stmt = $pdo->prepare("UPDATE times SET available = 0 WHERE id = ?");
-            $stmt->execute([$time_id]);
-
-            // Send confirmation emails
-            $client = new PostmarkClient($_ENV['POSTMARK_API_KEY']);
-
-            $message1 = array(
-                'To' => $email,
-                'From' => $_ENV['FROM_NAME'] . " <" . $_ENV['FROM_EMAIL'] . ">",
-                'Subject' => "Website Hacking Lab Time Confirmation",
-                'TextBody' => "Hello {$name},\n\n" .
-                "Your meeting time has been confirmed for {$formattedTimePacific} Pacific Time.\n\n" .
-                "Use the following link to join the meeting:\n" . $_ENV['MEETING_LINK'] . "\n\n" .
-                "If you are meeting with me in hopes I will help you solve a problem with the site you are building, emailing me a publicly viewable link and a short description of your problem ahead of time may help our session be more productive." . "\n\n" .
-                "See you then!\n\n"
-            );
-
-            $message2 = array(
-                'To' => $_ENV['FROM_EMAIL'],
-                'From' => "Website Hacking Lab <" . $_ENV['FROM_EMAIL'] . ">",
-                'Subject' => "New Appointment Booking",
-                'ReplyTo' => $name . " <" . $email . ">",
-                'TextBody' => "A new Website Hacking Lab appointment has been booked:\n\n" .
-                "Student: {$name}\n" .
-                "Email: {$email}\n" .
-                "Time: {$formattedTimeEastern} Eastern Time\n\n"
-            );  
-
-            $client->sendEmailBatch([$message1, $message2]);
-
-            $pdo->commit();
-            $success = "Appointment booked successfully! A confirmation email has been sent.";
-        } catch (Exception $e) {
-            $pdo->rollBack();
-            $error = "Error booking appointment: " . $e->getMessage();
         }
     }
 }
